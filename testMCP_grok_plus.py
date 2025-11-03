@@ -172,7 +172,7 @@ async def test_list_metadata_objects(client: MCPClient, meta_type: str, name_mas
     result = await client.call_tool("list_metadata_objects", args)
     if result.isError:
         return {"error": str(result.content[0])}
-    text = str(result.content[0]) if result.content else "{}"
+    text = result.content[0].text if result.content else ""
     try:
         return json.loads(text)
     except Exception:
@@ -185,7 +185,7 @@ async def test_get_metadata_structure(client: MCPClient, meta_type: str, name: s
     result = await client.call_tool("get_metadata_structure", args)
     if result.isError:
         return {"error": str(result.content[0])}
-    text = str(result.content[0]) if result.content else "{}"
+    text = result.content[0].text if result.content else ""
     try:
         return json.loads(text)
     except Exception:
@@ -198,7 +198,7 @@ async def test_list_predefined_data(client: MCPClient, meta_type: str, name: str
     result = await client.call_tool("list_predefined_data", args)
     if result.isError:
         return {"error": str(result.content[0])}
-    text = str(result.content[0]) if result.content else "{}"
+    text = result.content[0].text if result.content else ""
     try:
         return json.loads(text)
     except Exception:
@@ -211,7 +211,7 @@ async def test_get_predefined_data(client: MCPClient, meta_type: str, name: str,
     result = await client.call_tool("get_predefined_data", args)
     if result.isError:
         return {"error": str(result.content[0])}
-    text = str(result.content[0]) if result.content else "{}"
+    text = result.content[0].text if result.content else ""
     try:
         return json.loads(text)
     except Exception:
@@ -245,9 +245,11 @@ async def run_tests_async():
         "Catalogs", "ChartsOfCharacteristicTypes", "ChartsOfAccounts", "ChartsOfCalculationTypes"
     ]
 
-    test_stats = {"total": 0, "success": 0, "errors": 0}
+    methods = ["list_metadata_objects", "get_metadata_structure", "list_predefined_data", "get_predefined_data"]
+    method_stats = {method: {"total": 0, "success": 0, "errors": 0, "skipped": 0} for method in methods}
+    test_stats = {"total": 0, "success": 0, "errors": 0, "skipped": 0}
 
-    for i in range(10):
+    for i in range(200):
         test_number = i + 1
 
         # Шаг 1: Выбрать случайный тип метаданных, приоритет на те, что поддерживают предопределенные данные
@@ -271,18 +273,33 @@ async def run_tests_async():
         else:
             meta_type = random.choice(all_types)
 
+        # Для тестирования get_predefined_data нужно гарантировать, что будут объекты с предопределенными данными
+        # Поэтому если выбран тип, поддерживающий предопределенные данные, и это не первый тест, иногда пропускаем шаг 4-5
+        test_predefined = meta_type in predefined_supported_types and random.random() < 0.95  # 95% шанс тестировать предопределенные данные
+
         # Шаг 2: Получить список объектов этого типа
         mask = random.choice(["", "Номенклатура", "Документ"])
         max_items = random.randint(5, 20)
         list_result = await test_list_metadata_objects(client, meta_type, mask, max_items)
         log_test(test_number, "list_metadata_objects", {"metaType": meta_type, "nameMask": mask, "maxItems": max_items}, list_result)
 
+        method_stats["list_metadata_objects"]["total"] += 1
         test_stats["total"] += 1
         # Проверяем на ошибки в результате list_metadata_objects
-        if "error" in list_result or ("result" in list_result and "Ошибка" in str(list_result["result"])):
+        if "error" in list_result:
+            method_stats["list_metadata_objects"]["errors"] += 1
+            test_stats["errors"] += 1
+            continue
+        elif "result" in list_result and list_result["result"] == "":
+            method_stats["list_metadata_objects"]["skipped"] += 1
+            test_stats["skipped"] += 1
+            continue
+        elif "result" in list_result and "Ошибка" in str(list_result["result"]):
+            method_stats["list_metadata_objects"]["errors"] += 1
             test_stats["errors"] += 1
             continue
         else:
+            method_stats["list_metadata_objects"]["success"] += 1
             test_stats["success"] += 1
 
         # Шаг 3: Если есть объекты, выбрать случайный и получить его структуру
@@ -296,13 +313,15 @@ async def run_tests_async():
                     line = line.strip()
                     if line and '(' in line and ')' in line:
                         name = line.split('(')[0].strip()
+                        # Удаляем префикс типа метаданных, если есть (например, "ПланСчетов.")
+                        if '.' in name:
+                            name = name.split('.')[-1]
                         if name:
                             objects.append({"name": name})
                 if not objects:
-                    # Если не удалось распарсить, пропускаем
                     continue
             elif isinstance(result_text, list):
-                objects = result_text
+                objects = [{"name": obj.split('.')[-1] if '.' in obj else obj} for obj in result_text]
             else:
                 continue
 
@@ -313,63 +332,50 @@ async def run_tests_async():
                 else:
                     object_name = str(random_object)
 
-                # Очищаем имя от префикса "type='text' text='"
-                original_object_name = object_name  # Сохраняем оригинал для логов
-                if object_name.startswith("type='text' text='"):
-                    # Извлекаем имя между кавычками, но берем только до первой точки
-                    start = object_name.find("'") + 1
-                    temp_name = object_name[start:]
-                    # Ищем первую точку после префикса типа
-                    dot_pos = temp_name.find('.')
-                    if dot_pos > 0:
-                        object_name = temp_name[:dot_pos]
-                    else:
-                        # Если точки нет, берем всё до конца кавычки
-                        end = temp_name.find("'")
-                        if end > 0:
-                            object_name = temp_name[:end]
-                elif object_name.startswith("text' text='"):
-                    # Иногда парсинг дает неполный префикс, исправляем
-                    start = object_name.find("'") + 1
-                    temp_name = object_name[start:]
-                    dot_pos = temp_name.find('.')
-                    if dot_pos > 0:
-                        object_name = temp_name[:dot_pos]
-                    else:
-                        end = temp_name.find("'")
-                        if end > 0:
-                            object_name = temp_name[:end]
-                else:
-                    # Если префикса нет, но имя содержит "type='text' text='", это значит что-то пошло не так
-                    # В этом случае просто берем оригинальное имя
-                    pass
-
                 if object_name:
                     # Шаг 3: Получить структуру метаданных
                     structure_result = await test_get_metadata_structure(client, meta_type, object_name)
-                    log_test(test_number, "get_metadata_structure", {"metaType": meta_type, "name": original_object_name}, structure_result)
+                    log_test(test_number, "get_metadata_structure", {"metaType": meta_type, "name": object_name}, structure_result)
 
+                    method_stats["get_metadata_structure"]["total"] += 1
                     test_stats["total"] += 1
                     # Проверяем на ошибки в результате - если есть "Ошибка" в тексте, считаем ошибкой
-                    if "error" in structure_result or ("result" in structure_result and "Ошибка" in str(structure_result["result"])):
+                    if "error" in structure_result:
+                        method_stats["get_metadata_structure"]["errors"] += 1
+                        test_stats["errors"] += 1
+                    elif "result" in structure_result and structure_result["result"] == "":
+                        method_stats["get_metadata_structure"]["skipped"] += 1
+                        test_stats["skipped"] += 1
+                    elif "result" in structure_result and "Ошибка" in str(structure_result["result"]):
+                        method_stats["get_metadata_structure"]["errors"] += 1
                         test_stats["errors"] += 1
                     else:
+                        method_stats["get_metadata_structure"]["success"] += 1
                         test_stats["success"] += 1
 
-                    # Шаг 4: Если тип поддерживает предопределенные данные, получить их список
-                    if meta_type in predefined_supported_types:
+                    # Шаг 4: Если тип поддерживает предопределенные данные и решили тестировать, получить их список
+                    if meta_type in predefined_supported_types and test_predefined:
                         predefined_mask = random.choice(["", "Основной", "Дополнительный"])
                         predefined_list_result = await test_list_predefined_data(client, meta_type, object_name, predefined_mask, max_items)
-                        log_test(test_number, "list_predefined_data", {"metaType": meta_type, "name": original_object_name, "predefinedMask": predefined_mask, "maxItems": max_items}, predefined_list_result)
+                        log_test(test_number, "list_predefined_data", {"metaType": meta_type, "name": object_name, "predefinedMask": predefined_mask, "maxItems": max_items}, predefined_list_result)
 
+                        method_stats["list_predefined_data"]["total"] += 1
                         test_stats["total"] += 1
                         # Проверяем на ошибки в результате
-                        if "error" in predefined_list_result or ("result" in predefined_list_result and "Ошибка" in str(predefined_list_result["result"])):
+                        if "error" in predefined_list_result:
+                            method_stats["list_predefined_data"]["errors"] += 1
+                            test_stats["errors"] += 1
+                        elif "result" in predefined_list_result and predefined_list_result["result"] == "":
+                            method_stats["list_predefined_data"]["skipped"] += 1
+                            test_stats["skipped"] += 1
+                        elif "result" in predefined_list_result and "Ошибка" in str(predefined_list_result["result"]):
+                            method_stats["list_predefined_data"]["errors"] += 1
                             test_stats["errors"] += 1
                         else:
+                            method_stats["list_predefined_data"]["success"] += 1
                             test_stats["success"] += 1
 
-                            # Шаг 5: Если есть предопределенные данные, выбрать случайный и получить его детали
+                            # Шаг 5: Если есть предопределенные данные, выбрать несколько случайных и получить их детали
                             if "result" in predefined_list_result and predefined_list_result["result"]:
                                 result_text = predefined_list_result["result"]
                                 if isinstance(result_text, str):
@@ -379,49 +385,80 @@ async def run_tests_async():
                                         line = line.strip()
                                         if line and '(' in line and ')' in line:
                                             name = line.split('(')[0].strip()
+                                            # Удаляем префикс, если есть
+                                            if '.' in name:
+                                                name = name.split('.')[-1]
                                             if name:
                                                 predefined_objects.append({"name": name})
                                     if not predefined_objects:
                                         continue
                                 elif isinstance(result_text, list):
-                                    predefined_objects = result_text
+                                    predefined_objects = [{"name": obj.split('.')[-1] if '.' in obj else obj} for obj in result_text]
                                 else:
                                     continue
 
                                 if predefined_objects:
-                                    random_predefined = random.choice(predefined_objects)
-                                    if isinstance(random_predefined, dict):
-                                        predefined_name = random_predefined.get("name", random_predefined.get("Name", ""))
-                                    else:
-                                        predefined_name = str(random_predefined)
+                                    # Выбираем до 3 случайных предопределенных элементов для тестирования
+                                    num_to_test = min(len(predefined_objects), random.randint(1, 3))
+                                    selected_predefined = random.sample(predefined_objects, num_to_test)
 
-                                    if predefined_name:
-                                        predefined_data_result = await test_get_predefined_data(client, meta_type, object_name, predefined_name)
-                                        log_test(test_number, "get_predefined_data", {"metaType": meta_type, "name": original_object_name, "predefinedName": predefined_name}, predefined_data_result)
-
-                                        test_stats["total"] += 1
-                                        # Проверяем на ошибки в результате
-                                        if "error" in predefined_data_result or ("result" in predefined_data_result and "Ошибка" in str(predefined_data_result["result"])):
-                                            test_stats["errors"] += 1
+                                    for predefined_item in selected_predefined:
+                                        if isinstance(predefined_item, dict):
+                                            predefined_name = predefined_item.get("name", predefined_item.get("Name", ""))
                                         else:
-                                            test_stats["success"] += 1
+                                            predefined_name = str(predefined_item)
+
+                                        if predefined_name:
+                                            predefined_data_result = await test_get_predefined_data(client, meta_type, object_name, predefined_name)
+                                            log_test(test_number, "get_predefined_data", {"metaType": meta_type, "name": object_name, "predefinedName": predefined_name}, predefined_data_result)
+
+                                            method_stats["get_predefined_data"]["total"] += 1
+                                            test_stats["total"] += 1
+                                            # Проверяем на ошибки в результате
+                                            if "error" in predefined_data_result:
+                                                method_stats["get_predefined_data"]["errors"] += 1
+                                                test_stats["errors"] += 1
+                                            elif "result" in predefined_data_result and predefined_data_result["result"] == "":
+                                                method_stats["get_predefined_data"]["skipped"] += 1
+                                                test_stats["skipped"] += 1
+                                            elif "result" in predefined_data_result and "Ошибка" in str(predefined_data_result["result"]):
+                                                method_stats["get_predefined_data"]["errors"] += 1
+                                                test_stats["errors"] += 1
+                                            else:
+                                                method_stats["get_predefined_data"]["success"] += 1
+                                                test_stats["success"] += 1
 
     await client.close()
 
     # Вывод сводной статистики в MD таблице
-    success_rate = (test_stats['success'] / test_stats['total'] * 100) if test_stats['total'] > 0 else 0
-    summary = f"""
-## Сводная статистика тестов
+    summary = "## Сводная статистика тестов\n\n"
+    summary += "| Метод | Всего | Успешно | Ошибка | Пропущено | Процент успеха |\n"
+    summary += "|-------|-------|---------|--------|-----------|----------------|\n"
 
-| Параметр | Значение |
-|----------|---------|
-| Всего тестов | {test_stats['total']} |
-| Успешных | {test_stats['success']} |
-| Ошибок | {test_stats['errors']} |
-| Процент успеха | {success_rate:.1f}% |
+    total_all = 0
+    total_success = 0
+    total_errors = 0
+    total_skipped = 0
 
-[INFO] Тестирование завершено.
-"""
+    for method in methods:
+        stats = method_stats[method]
+        total = stats['total']
+        success = stats['success']
+        errors = stats['errors']
+        skipped = stats['skipped']
+        success_rate = (success / total * 100) if total > 0 else 0
+
+        summary += f"| {method} | {total} | {success} | {errors} | {skipped} | {success_rate:.1f}% |\n"
+
+        total_all += total
+        total_success += success
+        total_errors += errors
+        total_skipped += skipped
+
+    overall_success_rate = (total_success / total_all * 100) if total_all > 0 else 0
+    summary += f"| **Итого** | **{total_all}** | **{total_success}** | **{total_errors}** | **{total_skipped}** | **{overall_success_rate:.1f}%** |\n\n"
+
+    summary += "[INFO] Тестирование завершено.\n"
     print(summary)
     with open("testMCP.md", "a", encoding="utf-8") as f:
         f.write(summary)
