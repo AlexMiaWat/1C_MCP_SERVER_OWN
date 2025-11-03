@@ -2,3 +2,4 @@ __pycache__/*
 venv/*
 testMCP.md
 auth/__pycache__/*
+user.md
