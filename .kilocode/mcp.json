@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "1c-server-direct": {
+      "url": "http://home-pc/BUH/ru/hs/mcp/",
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "1c-server-stdio": {
+      "command": "D:/Work/MCP_1C/src/py_server/venv/Scripts/python.exe",
+      "args": [
+        "-m",
+        "src.py_server"
+      ],
+      "cwd": "D:/Work/MCP_1C/src/py_server",
+      "env": {
+        "PYTHONPATH": "D:/Work/MCP_1C/src/py_server",
+        "PYTHONIOENCODING": "utf-8",
+        "MCP_ONEC_URL": "http://home-pc/BUH",
+        "MCP_ONEC_USERNAME": "Admin",
+        "MCP_ONEC_PASSWORD": "Admin",
+        "MCP_ONEC_SERVICE_ROOT": "mcp"
+      },
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "1c-server-http": {
+      "url": "http://127.0.0.1:8000/mcp/",
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "1c-server-http-sse": {
+      "url": "http://127.0.0.1:8000/sse",
+      "alwaysAllow": [
+        "list_metadata_objects",
+        "get_metadata_structure",
+        "list_predefined_data",
+        "get_predefined_data"
+      ],
+      "timeout": 300
+    }
+  }
+}
