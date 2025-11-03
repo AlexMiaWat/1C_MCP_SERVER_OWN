@@ -239,13 +239,14 @@ class MCPHttpServer:
 	
 	def _mount_transports(self):
 		"""Монтирование транспортов MCP."""
-		
+
 		# Монтируем SSE транспорт на /sse
 		sse_app = self._create_sse_starlette_app()
 		self.app.mount("/sse", sse_app)
-		
+
 		# Монтируем Streamable HTTP транспорт на /mcp/ (с trailing slash для устранения 307 редиректов)
 		streamable_app = self._create_streamable_http_asgi()
+
 		self.app.mount("/mcp/", streamable_app)
 	
 	def _register_routes(self):
