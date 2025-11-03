@@ -245,6 +245,14 @@ async def run_tests_async():
         "Catalogs", "ChartsOfCharacteristicTypes", "ChartsOfAccounts", "ChartsOfCalculationTypes"
     ]
 
+    # Поддерживаемые типы для get_metadata_structure
+    supported_types_for_structure = [
+        "Catalogs", "Documents", "InformationRegisters", "AccumulationRegisters",
+        "AccountingRegisters", "CalculationRegisters", "Reports", "DataProcessors",
+        "ChartsOfCharacteristicTypes", "ChartsOfAccounts", "ChartsOfCalculationTypes",
+        "BusinessProcesses", "Tasks", "ExchangePlans"
+    ]
+
     methods = ["list_metadata_objects", "get_metadata_structure", "list_predefined_data", "get_predefined_data"]
     method_stats = {method: {"total": 0, "success": 0, "errors": 0, "skipped": 0} for method in methods}
     error_keywords = ["ошибка", "исключение", "не найден", "error", "exception", "not found", "вызватьисключение"]
@@ -316,20 +324,25 @@ async def run_tests_async():
             object_name = random_object.get("name", random_object.get("Name", "")) if isinstance(random_object, dict) else str(random_object)
 
             if object_name:
-                # Шаг 3: Получить структуру метаданных
-                structure_result = await test_get_metadata_structure(client, meta_type, object_name)
-                log_test(test_number, "get_metadata_structure", {"metaType": meta_type, "name": object_name}, structure_result)
+                # Шаг 3: Получить структуру метаданных, если тип поддерживается
+                if meta_type in supported_types_for_structure:
+                    structure_result = await test_get_metadata_structure(client, meta_type, object_name)
+                    log_test(test_number, "get_metadata_structure", {"metaType": meta_type, "name": object_name}, structure_result)
 
-                method_stats["get_metadata_structure"]["total"] += 1
-                # Проверяем на ошибки в результате
-                if "error" in structure_result:
-                    method_stats["get_metadata_structure"]["errors"] += 1
-                elif isinstance(structure_result, dict) and "result" in structure_result and isinstance(structure_result["result"], str) and any(keyword in structure_result["result"].lower() for keyword in error_keywords):
-                    method_stats["get_metadata_structure"]["errors"] += 1
-                elif (isinstance(structure_result, list) and not structure_result) or (isinstance(structure_result, dict) and "result" in structure_result and structure_result["result"] == ""):
-                    method_stats["get_metadata_structure"]["skipped"] += 1
+                    method_stats["get_metadata_structure"]["total"] += 1
+                    # Проверяем на ошибки в результате
+                    if "error" in structure_result:
+                        method_stats["get_metadata_structure"]["errors"] += 1
+                    elif isinstance(structure_result, dict) and "result" in structure_result and isinstance(structure_result["result"], str) and any(keyword in structure_result["result"].lower() for keyword in error_keywords):
+                        method_stats["get_metadata_structure"]["errors"] += 1
+                    elif (isinstance(structure_result, list) and not structure_result) or (isinstance(structure_result, dict) and "result" in structure_result and structure_result["result"] == ""):
+                        method_stats["get_metadata_structure"]["skipped"] += 1
+                    else:
+                        method_stats["get_metadata_structure"]["success"] += 1
                 else:
-                    method_stats["get_metadata_structure"]["success"] += 1
+                    method_stats["get_metadata_structure"]["total"] += 1
+                    method_stats["get_metadata_structure"]["skipped"] += 1
+                    log_test(test_number, "get_metadata_structure", {"metaType": meta_type, "name": object_name}, {"result": "Skipped: metaType not supported"})
 
                 # Шаг 4: Если тип поддерживает предопределенные данные, получить их список
                 if meta_type in predefined_supported_types:
@@ -419,7 +432,7 @@ async def run_tests_async():
         total_skipped += skipped
 
     overall_success_rate = (total_success / total_all * 100) if total_all > 0 else 0
-    summary += f"| **Итого**              | **{total_all:>5}** | **{total_success:>7}** | **{total_errors:>6}** | **{total_skipped:>9}** | **{overall_success_rate:>13.1f}%** |\n\n"
+    summary += f"| Итого                  | {total_all:>5} | {total_success:>7} | {total_errors:>6} | {total_skipped:>9} | {overall_success_rate:>13.1f}% |\n\n"
 
     summary += "[INFO] Тестирование завершено.\n"
     print(summary)
